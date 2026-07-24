@@ -153,7 +153,86 @@
 
     .hero-video-link:hover { opacity: 0.85; }
 
-    /* SECTIONS */
+    /* ─── INFINITE MARQUEE ─── */
+    .marquee-section {
+      position: relative;
+      padding: 3rem 0 3.5rem;
+      overflow: hidden;
+      border-bottom: 1px solid var(--border);
+    }
+
+    /* Progressive blur fade on left + right edges */
+    .marquee-section::before,
+    .marquee-section::after {
+      content: '';
+      position: absolute;
+      top: 0;
+      bottom: 0;
+      width: 160px;
+      z-index: 2;
+      pointer-events: none;
+    }
+
+    .marquee-section::before {
+      left: 0;
+      background: linear-gradient(to right, var(--bg) 0%, transparent 100%);
+    }
+
+    .marquee-section::after {
+      right: 0;
+      background: linear-gradient(to left, var(--bg) 0%, transparent 100%);
+    }
+
+    .marquee-label {
+      text-align: center;
+      font-size: 0.72rem;
+      font-weight: 600;
+      letter-spacing: 0.14em;
+      text-transform: uppercase;
+      color: var(--muted);
+      margin-bottom: 1.75rem;
+      opacity: 0.6;
+    }
+
+    .slider-viewport {
+      overflow: hidden;
+      width: 100%;
+    }
+
+    .slider-track {
+      display: flex;
+      gap: 14px;
+      width: max-content;
+      animation: infinite-slide 80s linear infinite;
+    }
+
+    .slider-track:hover {
+      animation-play-state: paused;
+    }
+
+    .slider-track img {
+      height: 160px;
+      width: 240px;
+      object-fit: cover;
+      border-radius: 10px;
+      border: 1px solid rgba(255,255,255,0.07);
+      cursor: pointer;
+      flex-shrink: 0;
+      transition: transform 0.25s ease, border-color 0.25s ease, box-shadow 0.25s ease;
+    }
+
+    .slider-track img:hover {
+      transform: scale(1.06) translateY(-4px);
+      border-color: rgba(99,102,241,0.5);
+      box-shadow: 0 12px 40px rgba(0,0,0,0.5);
+    }
+
+    @keyframes infinite-slide {
+      from { transform: translateX(0); }
+      to   { transform: translateX(-50%); }
+    }
+
+    /* ─── SECTIONS ─── */
     section {
       padding: 5rem 2rem;
       max-width: 1400px;
@@ -228,7 +307,23 @@
       overflow: hidden;
     }
 
-    /* EPIC GRID */
+    /* ─── EPIC EARTH — 3D perspective grid ─── */
+    .epic-perspective {
+      perspective: 1400px;
+      perspective-origin: 50% 0%;
+    }
+
+    @media (min-width: 768px) {
+      .epic-perspective .epic-grid {
+        transform: rotateX(10deg) scale(1.02);
+        transform-style: preserve-3d;
+        transition: transform 0.6s cubic-bezier(0.22, 1, 0.36, 1);
+      }
+      .epic-perspective:hover .epic-grid {
+        transform: rotateX(0deg) scale(1);
+      }
+    }
+
     .epic-grid {
       display: grid;
       grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
@@ -411,6 +506,9 @@
       section { padding: 3rem 1rem; }
       .apod-grid { grid-template-columns: 1fr 1fr; gap: 1rem; }
       .epic-grid { grid-template-columns: 1fr 1fr; gap: 1rem; }
+      .slider-track img { height: 120px; width: 180px; }
+      .marquee-section::before,
+      .marquee-section::after { width: 80px; }
     }
   </style>
 </head>
@@ -442,6 +540,16 @@
   </div>
 </div>
 
+<!-- INFINITE MARQUEE: scrolling APOD strip -->
+<div class="marquee-section">
+  <div class="marquee-label">From the archive</div>
+  <div class="slider-viewport">
+    <div id="slider-track" class="slider-track">
+      <div class="loading" style="padding:2rem"><div class="spinner"></div></div>
+    </div>
+  </div>
+</div>
+
 <!-- APOD ARCHIVE -->
 <section id="apod">
   <div class="section-header">
@@ -459,8 +567,10 @@
     <h2 class="section-title">Earth from a Million Miles Away</h2>
     <span class="section-sub">DSCOVR / EPIC — full-disk natural color imagery</span>
   </div>
-  <div id="epic-grid" class="epic-grid">
-    <div class="loading"><div class="spinner"></div> Loading Earth images…</div>
+  <div class="epic-perspective">
+    <div id="epic-grid" class="epic-grid">
+      <div class="loading"><div class="spinner"></div> Loading Earth images…</div>
+    </div>
   </div>
 </section>
 
@@ -486,6 +596,16 @@
     document.getElementById(id).scrollIntoView({ behavior: 'smooth' });
     document.querySelectorAll('nav a').forEach(a => a.classList.remove('active'));
     event.target.classList.add('active');
+  }
+
+  // Shared gallery cache — avoids fetching twice for marquee + grid
+  let _galleryCache = null;
+  async function getGallery() {
+    if (!_galleryCache) {
+      const r = await fetch('/api/apod/gallery');
+      _galleryCache = await r.json();
+    }
+    return _galleryCache;
   }
 
   // HERO: Today's APOD
@@ -515,15 +635,36 @@
     }
   }
 
-  // APOD GALLERY
+  // INFINITE MARQUEE
+  async function loadMarquee() {
+    const track = document.getElementById('slider-track');
+    try {
+      const items = await getGallery();
+      const imgHtml = items.map(d => `
+        <img
+          src="${d.url}"
+          alt="${d.title.replace(/"/g, '&quot;')}"
+          loading="lazy"
+          title="${d.title.replace(/"/g, '&quot;')}"
+          onclick='openModal(${JSON.stringify(d).replace(/'/g, "&#39;")})'
+          onerror="this.style.display='none'"
+        >
+      `).join('');
+      // Duplicate the strip for seamless infinite scroll
+      track.innerHTML = imgHtml + imgHtml;
+    } catch (e) {
+      track.innerHTML = '';
+    }
+  }
+
+  // APOD GALLERY GRID
   async function loadApodGallery() {
     const grid = document.getElementById('apod-grid');
     try {
-      const r = await fetch('/api/apod/gallery');
-      const items = await r.json();
+      const items = await getGallery();
       grid.innerHTML = items.map(d => `
-        <div class="apod-card" onclick="openModal(${JSON.stringify(d).replace(/"/g, '&quot;')})">
-          <img src="${d.url}" alt="${d.title}" loading="lazy" onerror="this.style.display='none'">
+        <div class="apod-card" onclick='openModal(${JSON.stringify(d).replace(/'/g, "&#39;")})'>
+          <img src="${d.url}" alt="${d.title.replace(/"/g, '&quot;')}" loading="lazy" onerror="this.style.display='none'">
           <div class="apod-card-body">
             <div class="apod-card-date">${formatDate(d.date)}</div>
             <div class="apod-card-title">${d.title}</div>
@@ -542,7 +683,7 @@
       const r = await fetch('/api/epic');
       const items = await r.json();
       grid.innerHTML = items.map(d => `
-        <div class="epic-card" onclick="openEpicModal(${JSON.stringify(d).replace(/"/g, '&quot;')})">
+        <div class="epic-card" onclick='openEpicModal(${JSON.stringify(d).replace(/'/g, "&#39;")})'>
           <img src="${d.thumb}" alt="Earth" loading="lazy" onerror="this.src='${d.url}'">
           <div class="epic-card-overlay">
             <div class="epic-card-date">${formatDateTime(d.date)}</div>
@@ -600,6 +741,7 @@
   }
 
   loadHero();
+  loadMarquee();
   loadApodGallery();
   loadEpic();
 </script>
